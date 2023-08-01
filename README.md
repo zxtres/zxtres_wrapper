@@ -249,6 +249,7 @@ Señales de depuración de la parte DP. Podemos ignorarlas de momento. Las dejam
 ```
 
 ## Calculo de los parámetros de ZX3W
+
 Cuando se instancie el ZX3W, hay que especificar cuatro parámetros:
 - **CLKVIDEO** indica la frecuencia en MHz del reloj que usamos como dotclock. OJO: es la frecuencia sin tener en cuenta el enable. Por ejemplo, en el Spectrum, CLKVIDEO son 28 MHz, aunque el dotclock son 14 MHz. Pues en ese caso, CLKVIDEO valdría 28, no 14.
 - **HSTART** y **VSTART** indican la coordenada horizontal y vertical, medida en píxeles, de la pantalla, donde comenzará a grabarse la información en el framebuffer.
@@ -281,7 +282,7 @@ A esas 19 líneas hay que añadir cuántas líneas me voy a saltar (porque no ca
 
 Lo que obtengo, en definitiva, es una ventana de video de 640x480 pixeles, en los que descarto 32 píxeles a cada lado izquierda-derecha, y 24 píxeles a cada lado arriba-abajo. En este ejemplo (y en el ZX Spectrum), esta mordida es admisible. En otros cores quizás no, y habrá que hacer un poco encaje de bolillos para poder meter más píxeles en el framebuffer. Por ejemplo, para un core de Amstrad CPC, en horizontal ya tengo que guardar 640 píxeles, y descartar todo el borde. En vertical tengo 200 líneas pero puedo guardar 240, así que tendré algo de borde arriba y abajo, pero nada de borde a izquierda y derecha.
 
-## Ejemplo de instanciación completa
+## Ejemplo de instanciación casi completa
 
 Esta es la instanciación del zx3w en el core de test de carta de ajuste. Este core usa un modo de pantalla PAL de 704x576 lineas, PAL entrelazado, con dos campos de 288 líneas cada uno. La temporización es ligeramente diferente del ejemplo anterior, por lo que los valores para HSTART y VSTART están ligeramente cambiados, como podeis ver.
 
@@ -342,3 +343,106 @@ Cuando os toque portar un core y añadir este módulo, es más conveniente ir po
   .dp_heartbeat(led[1])
   );
 ```
+## Estrategia para adaptar cores a ZX3W
+
+### Conectar sonido
+
+Dado que ZX3W es un módulo con mcuhas señales y mucha interacción con el core principal que estamos portando, es conveniente ir paso a paso. Por ejemplo, podemos empezaar por conseguir que el sonido se escuche en todos los sistemas que implementa ZX3W.
+
+Copia en tu proyecto, si no lo has hecho ya, el fichero XDC que contiene todos los pines del ZXTRES (las tres versiones). Puedes encontrarlo en el core de ZX Spectrum, o el de test de carta de ajuste.
+
+No tienes por qué comentar los pines que no use tu proyecto. Vivado los ignora, y no da error como sí hacía XST.
+
+Una instanciación mínima, centrándonos de momento en el sonido, podría ser algo así:
+
+```
+// Pon en CLKVIDEO el valor en MHz que vayas a usar en clkvideo. En este ejemplo es 14, pero 
+// debes cambiarlo a la frecuencia que realmente uses. No tiene por qué ser, de momento, 
+// la frecuencia de un reloj de video. Basta con que sea un reloj de unos cuántos MHz.
+
+  zxtres_wrapper #(.HSTART(0), .VSTART(0), .CLKVIDEO(14), .INITIAL_FIELD(0)) scaler (
+  .clkvideo(clkvideo),        // aunque no vayamos a hacer nada con video, pon aquí un reloj válido
+  .enclkvideo(1'b1),          // y de momento, dejamos el enable a 1
+  .clkpalntsc(1'b0),          // De momento, nada de relojes PAL/NTSC
+  .reset_n(clock_stable),     // El módulo PLL o MCMM que genera los relojes debería generar una 
+                              // señal "locked" que vale 1 cuando el reloj es estable, 
+                              // y 0 cuando no lo está. Conéctala aquí.
+  .reboot_fpga(1'b0),         // De momento, no usaremos el ICAP 
+  ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+  .sram_addr_in(0),        //
+  .sram_addr_out(),        // No conectamos la SRAM todavía
+  .we_n_in(1'b1),          //
+  .sram_we_n_out(),        //
+  .sram_data(8'h00),       //
+  .poweron_reset(),        //
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+  .video_output_sel(1'b0),        //
+  .disable_scanlines(1'b1),       // Como no usamos video aun,
+  .monochrome_sel(2'd0),          // todo esto lo dejamos con
+  .interlaced_image(1'b0),        // valores "inertes".
+  .ad724_modo(1'b0),              //
+  .ad724_clken(1'b0),             //
+  ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  .ri(8'h00),               //
+  .gi(8'h00),               //
+  .bi(8'h00),               // Lo mismo aquí. No ponemos nada
+  .hsync_ext_n(1'b1),       //
+  .vsync_ext_n(1'b1),       //
+  .csync_ext_n(1'b1),       //
+  ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  .audio_l(audio_l_del_core),            // Entrada de audio
+  .audio_r(audio_r_del_core),            // 16 bits, PCM, ca2
+  .i2s_bclk(i2s_bclk),                   // Esta es la parte que vamos a discutir en un momento
+  .i2s_lrclk(i2s_lrclk),        // Salida hacia el módulo I2S
+  .i2s_dout(i2s_dout),          //
+  .sd_audio_l(audio_out_left),  // Salida de 1 bit desde
+  .sd_audio_r(audio_out_right), // los conversores sigma-delta
+  ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  .ro(),           //
+  .go(),           // Esto es la salida de video
+  .bo(),           // De nuevo, no conectamos nada aquí.
+  .hsync(),        // Seguimos, de momento, con la salida original que proporcione el core
+  .vsync(),        //
+  ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  .dp_tx_lane_p(dp_tx_lane_p),          // De los dos lanes de la Artix 7, solo uso uno.
+  .dp_tx_lane_n(dp_tx_lane_n),          // Cada lane es una señal diferencial. Esta es la parte negativa.
+  .dp_refclk_p(dp_refclk_p),            // Reloj de referencia para los GPT. Siempre es de 135 MHz
+  .dp_refclk_n(dp_refclk_n),            // El reloj también es una señal diferencial.
+  .dp_tx_hp_detect(dp_tx_hp_detect),    // Indica que se ha conectado un monitor DP. Arranca todo el proceso de entrenamiento
+  .dp_tx_auxch_tx_p(dp_tx_auxch_tx_p),  // Señal LVDS de salida (transmisión)
+  .dp_tx_auxch_tx_n(dp_tx_auxch_tx_n),  // del canal AUX. En alta impedancia durante la recepción
+  .dp_tx_auxch_rx_p(dp_tx_auxch_rx_p),  // Señal LVDS de entrada (recepción)
+  .dp_tx_auxch_rx_n(dp_tx_auxch_rx_n),   // del canal AUX. Siempre en alta impedancia ya que por aquí no se transmite nada.
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  .dp_ready(),
+  .dp_heartbeat()
+  );
+```
+La última parte que corresponde a las señales del DisplayPort, aunque tampoco las vayamos a usar ahora para generar video, es mejor dejarlas ya conectadas desde el principio. En particular, el reloj de 135 MHz diferencial, que aparece ahí, lo necesita el wrapper para unas cuantas cosas que no tienen que ver con la salida de video de DP.
+
+Vamos a centrarnos en cómo generar las señales ```audio_l_del_core``` y ```audio_r_del_core``` . Si el core genera una salida de audio monoaural, pues estas dos señales serán en realidad la misma.
+
+Se necesita que sean de 16 bits y en complemento a 2. Por otra parte, el core que estamos portando puede ofrecer el sonido (si lo ofrece) de muchas formas diferentes:
+
+- 1 bit de sonido, estilo beeper de Spectrum. Monoaural. Para este caso, solo podemos generar dos niveles. Por ejemplo, el nivel máximo positivo cuando es 1, y el máximo negativo cuando es 0. En 16 bits ca2, estos niveles son 7FFFh y 8000h. Una forma de generar la señal podría ser:
+  ```wire [15:0] audio_l_del_core = (audio_1_bit == 1'b1)? 16'h7FFF : 16'h8000;```
+  Otra forma podría ser:
+  ```wire [15:0] audio_l_del_core = {16{audio_1_bit}} ^ 16'h8000;```
+
+- Varios bits de salida de sonido (por ejemplo, la salida de un generador de sonidos tal como el AY-3-8912) en binario natural (sin signo). Para hacerlo más interesante, supondremos que se generan menos de 16 bits. En este caso hay que hacer dos conversiones: una, para pasar de los bits que se generan, a 16, y luego convertir a complemento a 2.
+
+  Pongamos que el core genera una señal de audio de 8 bits sin signo llamada ```audio_8_bits```. Para escalarla a 16 bits, concatenamos esa señal tantas veces como necesitemos hasta llegar a 16 bits. Para convertirla a complemento a 2, xoreamos el bit 15 de este resultado. Las dos operaciones quedan así:
+```wire [15:0] audio_l_del_core = {audio_8_bits, audio_8_bits} ^ 16'h8000;```
+
+- Varios bits de salida de sonido, en complemento a 2, pero menos de 16 bits. En este caso hay que deshacer por un momento el complemento a 2, luego escalar a 16 bits, y por último xorear para volver a tener complemento a 2. Usamos de nuevo una señal de 8 bits de audio, ahora con signo. Voy a hacerlo primero en varios pasos, para que se vea cómo es la conversión:
+```wire [7:0] audio_8_bits_sin_signo = audio_8_bits ^ 8'h80;```
+Esto quita el signo del valor original y lo guarda como un valor en binario natural. Fíjate que es el mismo XOR que hacemos para volver a ponerla en complemento a 2. Siempre se xorea el bit más significativo, en este caso, el bit 7. De ahí que usamos 80h
+
+  Ahora escalamos esta señal a 16 bits, y xoreamos para volver a tener complemento a 2
+```wire [15:0] audio_l_del_core = {audio_8_bits_sin_signo, audio_8_bits_sin_signo} ^ 16'h8000;```
+
+- Varios bits de salida de sonido, en complemento a 2, pero más de 16 bits. En el improbable caso de que un core genere una salida de sonido así, basta con coger los 16 bits más significativos del valor. Por ejemplo, si ```audio_24_bits``` es una señal de audio de 24 bits en ca2, haríamos:
+```wire [15:0] audio_l_del_core = audio_24_bits[23:8];```
+
+-  Por último, si el core genera una señal estéreo, habrá que repetir esto para el otro canal. Si es una señal monoaural, enviamos la misma señal escalada y preparada a las dos entradas ```audio_l``` y ```audio_r``` del ZX3W. 
+ 
