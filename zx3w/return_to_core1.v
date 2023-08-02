@@ -57,7 +57,7 @@ module multiboot_artix7 (
     icap_command[ 1] = {1'b1, 1'b1, 32'hAA995566};  // sync word
     icap_command[ 2] = {1'b1, 1'b1, 32'h20000000};  // nop
     icap_command[ 3] = {1'b1, 1'b1, 32'h30020001};  // escritura en registro WBSTAR
-    icap_command[ 4] = {1'b1, 1'b1, 32'h00010000};  // en este ciclo hay que poner la dirección SPI (28 bits)
+    icap_command[ 4] = {1'b1, 1'b1, 32'h00000000};  // en este ciclo hay que poner la direcciÃ³n SPI (28 bits)
     icap_command[ 5] = {1'b1, 1'b1, 32'h30008001};  // escritura en registro CMD
     icap_command[ 6] = {1'b1, 1'b1, 32'h0000000F};  // dar orden de warm reboot (IPROG)
     icap_command[ 7] = {1'b1, 1'b1, 32'h20000000};  // nop 
