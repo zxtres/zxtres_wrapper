@@ -371,7 +371,7 @@ Una instanciación mínima, centrándonos de momento en el sonido, podría ser a
   ///////////////////////////////////////////////////////////////////////////////////////////////////////////
   .sram_addr_in(0),        //
   .sram_addr_out(),        // No conectamos la SRAM todavía
-  .we_n_in(1'b1),          //
+  .sram_we_n_in(1'b1),     //
   .sram_we_n_out(),        //
   .sram_data(8'h00),       //
   .poweron_reset(),        //
