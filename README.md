@@ -75,12 +75,21 @@ module zxtres_wrapper (
 
   **reboot_fpga** es una señal que si está a 1, hace que la FPGA se resetee y cargue de nuevo el core principal. Lai dea es que una vez que se ponga a 1, ya se quede con ese valor, hasta que la propia FPGA se resetee. No vale con ponerla a 1 durante un ciclo de reloj y luego volverla a 0. Si no la usamos, poner un 0 aquí.
 ```
-  input wire [20:0] sram_addr_in,
-  output wire [20:0] sram_addr_out,
-  input wire sram_we_n_in,
-  output wire sram_we_n_out,
-  input wire [7:0] sram_data,
-  output wire poweron_reset,
+  input  wire [20:0] sram_addr_in,
+  input  wire        sram_we_n_in,
+  input  wire        sram_oe_n_in,
+  input  wire [7:0]  sram_data_to_chip,
+  output wire [7:0]  sram_data_from_chip,
+  //----------------------------------------  
+  output wire [19:0] sram_addr_out,
+  output wire        sram_we_n_out,
+  output wire        sram_oe_n_out,
+  output wire        sram_ub_n_out,
+  output wire        sram_lb_n_out,  
+  inout  wire [15:0] sram_data,
+  output wire        poweron_reset,
+  output wire        config_vga_on,
+  output wire        config_scanlines_off,
   //////////////////////////////////////////
 ```
   Este grupo de señales es una interfaz simple con la memoria RAM. Sirven para que el wrapper pueda interrogar, al principio del todo, cuáles son los parámetros de video de la BIOS, y copiarlos para usarlos en el propio wrapper.
@@ -90,14 +99,21 @@ module zxtres_wrapper (
 
   **sram_addr_out** es la salida del bus de direcciones desde el core hasta la SRAM física. Aquí esto lo conectamos directamente al bus de direcciones en el TLD del módulo. Incluso si el core no usa la SRAM para nada, el sistema de interrogación de parámetros de la BIOS sí que lo usa.
 
-  **sram_we_n_in** y **sram_we_n_out** hacen el mismo papel que en el caso anterior, pero para la señal de habilitación de escritura, que es activa a nivel bajo. Si nuestro core no usa la SRAM, poner en sram_we_n_in un 1. sram_we_n_out va conectada directamente afuera de la FPGA, a la SRAM.
+  **sram_oe_n_in** y **sram_oe_n_out** se usan como señales de habilitación del chip de SRAM para lectura. Si el core no tiene esa señal de forma explícita, se puede dejar *sram_oe_n_in* a 0. *sram_oe_n_out* se conecta directamente a la SRAM.
 
-**sram_data** es el bus de direcciones de 8 bits, pero el de entrada. Este se conecta directamente al bus de datos bidireccional en el TLD del módulo, conectado directamente a la SRAM. Si el core usa la SRAM internamente, no habrá ningún problema en que ambos, el core y el zx3w tengan señales que conecten a la vez al bus de datos bidireccional.
+  **sram_we_n_in** y **sram_we_n_out** hacen el mismo papel que en el caso anterior, pero para la señal de habilitación de escritura, que es activa a nivel bajo. Si nuestro core no usa la SRAM, poner en *sram_we_n_in* un 1. *sram_we_n_out* va conectada directamente afuera de la FPGA, a la SRAM.
 
-**poweron_reset** es una señal de salida, activa a nivel alto. Sirve para resetear el core completo (no el ZX3W, sino el core original), con objeto de que dé tiempo al wrapper a interrogar a la memoria para conocer la configuración de video, y por otra parte para dar tiempo a que el reloj de alta velocidad de 135 MHz (y de ahí, el de 1.6 2 GHz) del DisplayPort tengan tiempo de estabilizarse. En el core original, mientras esté en reset, no debería hacerse ninguna operación de memoria, dejando buses de salida de datos a memoria en alta impedancia y señales de control a nivel alto.
+  **sram_lb_n_out** y **sram_ub_n_out** se conectan a las señales homónimas en la SRAM.
+
+  **sram_data** es el bus de direcciones de 16 bits, bidireccional. Este se conecta directamente al bus de datos bidireccional en el TLD del módulo, conectado directamente a la SRAM. Si el core usa la SRAM internamente, usará las señales **sram_data_to_chip** donde el core pondrá el dato que quiere grabar en la SRAM, y **sram_data_from_chip** por donde sale el dato leído de la SRAM, de vuelta al core. OJO con los sentidos de las señales, que pueden despistar.
+
+  **poweron_reset** es una señal de salida, activa a nivel alto. Sirve para resetear el core completo (no el ZX3W, sino el core original), con objeto de que dé tiempo al wrapper a interrogar a la memoria para conocer la configuración de video, y por otra parte para dar tiempo a que el reloj de alta velocidad de 135 MHz (y de ahí, el de 1.6 2 GHz) del DisplayPort tengan tiempo de estabilizarse. En el core original, mientras esté en reset, no debería hacerse ninguna operación de memoria, dejando buses de salida de datos a memoria en alta impedancia y señales de control a nivel alto.
+
+  **config_vga_on** y **config_scanlines_off** son señales de salida que indican lo que hay guardado en la configuración de la BIOS respecto de si se habilita la salida VGA y/o si dicha salida tiene las scanlines deshabilitadas.
+
+Idealmente, conectaremos **config_vga_on** a **video_output_sel** y **config_scanlines_off** a **disable_scanlines** y si desde el mismo core no se da opción a cambiar esta situación, pues se pueden dejar así conectadas y ya está.
+
 ```
-  output wire config_vga_on,
-  output wire config_scanlines_on,
   input wire video_output_sel,
   input wire disable_scanlines,
   input wire [1:0] monochrome_sel,
@@ -106,10 +122,6 @@ module zxtres_wrapper (
   input wire ad724_clken,
   //////////////////////////////////////////
 ```
-
-  **config_vga_on** y **config_scanlines_on** son señales de salida que indican lo que hay guardado en la configuración de la BIOS respecto de si se habilita la salida VGA y/o si dicha salida tiene las scanlines activadas.
-
-Idealmente, conectaremos **config_vga_on** a **video_output_sel** y **config_scanlines_on** a **disable_scanlines** negando esta última señal previamente.
 
 **monochrome_sel** puede tomar los valores 0, 1, 2, 3 y sirve para aplicar cuatro efectos diferentes a la salida de video, que se verán reflejados tanto en la salida original de 15 kHz como en VGA y DP.
 
@@ -373,7 +385,7 @@ Una instanciación mínima, centrándonos de momento en el sonido, podría ser a
   .sram_addr_out(),        // No conectamos la SRAM todavía
   .sram_we_n_in(1'b1),     //
   .sram_we_n_out(),        //
-  .sram_data(8'h00),       //
+  .sram_data(),            //
   .poweron_reset(),        //
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
   .video_output_sel(1'b0),        //
